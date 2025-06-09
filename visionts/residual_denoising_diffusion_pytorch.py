@@ -1261,7 +1261,7 @@ class ResidualDiffusion(nn.Module):
             return unnormalize_to_zero_to_one(img_list)
 
     @torch.no_grad()
-    def sample(self, x_input=0, batch_size=16, last=True):
+    def sample(self, x_input=0, batch_size=2, last=True):
         image_size, channels = self.image_size, self.channels
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
         if self.condition:
@@ -1373,12 +1373,13 @@ class ResidualDiffusion(nn.Module):
         else:
             raise ValueError(f'unknown objective {self.objective}')
 
-        u_loss = False
+        u_loss = True
         if u_loss:
             x_u = self.q_posterior_from_res_noise(pred_res, pred_noise, x, t)
             u_gt = self.q_posterior_from_res_noise(x_res, noise, x, t)
             loss = 10000*self.loss_fn(x_u, u_gt, reduction='none')
-            return [loss]
+            # return [loss]
+            return x_u
         else:
             loss_list = []
             for i in range(len(model_out)):

@@ -166,13 +166,13 @@ class ResidualDiffusionModel(nn.Module):
         # init
         # os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(e) for e in [0])
         # sys.stdout.flush()
-
+        self.path="/root/data1/code/VisionTS/model-100.pt"
         self.num_unet = 2
         self.condition = True
         self.input_condition = False
         self.input_condition_mask = False
-        self.objective='pred_res_noise',
-        self.test_res_or_noise = "res_noise",
+        self.objective ='pred_res_noise'
+        self.test_res_or_noise = "res_noise"
         self.img_to_img_translation = True
         self.image_size = 64
         # if len(sys.argv) > 1:
@@ -208,13 +208,13 @@ class ResidualDiffusionModel(nn.Module):
             test_res_or_noise = self.test_res_or_noise,
             img_to_img_translation = self.img_to_img_translation
         )
-       
-        try:
-            checkpoint = torch.load('/root/data1/code/ResidualDiffusion/model-100.pt', map_location='cpu')
-            self.diffusion.load_state_dict(checkpoint['model'], strict=True)
 
-        except:
-            print(f"Bad checkpoint file.")
+        data = torch.load(self.path, map_location='cpu')
+
+        self.diffusion.load_state_dict(data['model'])
+            
+        print("load model weights - "+(self.path))
+
 
         if finetune_type != 'full':
             for n, param in self.diffusion.named_parameters():
@@ -302,13 +302,11 @@ class ResidualDiffusionModel(nn.Module):
 
         # 4. Reconstruction
         
-        y, _ = self.diffusion(image_input)
-
-        
-        image_reconstructed = self.diffusion.unpatchify(y) # [(bs x nvars) x 3 x h x w]
+        y = self.diffusion(image_input)
+        # image_reconstructed = self.diffusion.unpatchify(y) # [(bs x nvars) x 3 x h x w]
         
         # 5. Forecasting
-        y_grey = torch.mean(image_reconstructed, 1, keepdim=True) # color image to grey
+        y_grey = torch.mean(y, 1, keepdim=True) # color image to grey
         y_segmentations = self.output_resize(y_grey) # resize back
         y_flatten = einops.rearrange(
             y_segmentations, 
@@ -334,3 +332,4 @@ class ResidualDiffusionModel(nn.Module):
             image_reconstructed = einops.rearrange(image_reconstructed, '(b n) c h w -> b n h w c', b=x_enc.shape[0])
             return y, image_input, image_reconstructed
         return y
+

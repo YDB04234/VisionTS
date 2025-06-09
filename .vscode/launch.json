@@ -5,7 +5,37 @@
             "name": "ResidualDiffusion Long Term Forecast Debug",
             "type": "python",
             "request": "launch",
-            "cwd": "/root/data1/code/VisionTS/long_term_tsf",  // 添加工作路径
+            "cwd": "/root/data1/code/VisionTS/long_term_tsf",
+            "program": "run.py",
+            "args": [
+                "--task_name", "long_term_forecast",
+                "--is_training", "1",
+                "--model", "ResidualDiffusion",
+                "--root_path", "./dataset/ETT-small/",
+                "--data_path", "ETTh1.csv",
+                "--save_dir", "save/ETTh1_96",
+                "--model_id", "ResidualDiffusion_ETTh1_96",
+                "--data", "ETTh1",
+                "--features", "M",
+                "--train_epochs", "1",
+                "--vm_arch", "mae_base",
+                "--vm_ckpt", "../ckpt/",
+                "--seq_len", "2880",
+                "--periodicity", "24",
+                "--pred_len", "96",
+                "--norm_const", "0.4",
+                "--align_const", "0.4",
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1,2,3"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "VisionTS Long Term Forecast Debug",
+            "type": "python",
+            "request": "launch",
+            "cwd": "/root/data1/code/VisionTS/long_term_tsf",
             "program": "run.py",
             "args": [
                 "--task_name", "long_term_forecast",
@@ -13,68 +43,23 @@
                 "--model", "VisionTS",
                 "--root_path", "./dataset/ETT-small/",
                 "--data_path", "ETTh1.csv",
-                "--save_dir", "save/ETTh1_${input:pred_len}",
-                "--model_id", "ResidualDiffusion_ETTh1_${input:pred_len}",
+                "--save_dir", "save/ETTh1_96",
+                "--model_id", "VisionTS_ETTh1_96",
                 "--data", "ETTh1",
                 "--features", "M",
                 "--train_epochs", "1",
-                "--vm_arch", "${input:vm_arch}",
-                "--vm_ckpt", "${input:ckpt_dir}",
-                "--seq_len", "${input:context_len}",
-                "--periodicity", "${input:periodicity}",
-                "--pred_len", "${input:pred_len}",
-                "--norm_const", "${input:norm_const}",
-                "--align_const", "${input:align_const}"
+                "--vm_arch", "mae_base",
+                "--vm_ckpt", "../ckpt/",
+                "--seq_len", "2880",
+                "--periodicity", "24",
+                "--pred_len", "96",
+                "--norm_const", "0.4",
+                "--align_const", "0.4"
             ],
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0"
+                "CUDA_VISIBLE_DEVICES": "0,1,2,3"
             },
             "justMyCode": false
-        }
-    ],
-    "inputs": [
-        {
-            "id": "ckpt_dir",
-            "type": "promptString",
-            "description": "Checkpoint directory",
-            "default": "../ckpt/"
-        },
-        {
-            "id": "vm_arch",
-            "type": "promptString",
-            "description": "Vision model architecture",
-            "default": "mae_base"
-        },
-        {
-            "id": "context_len",
-            "type": "promptString",
-            "description": "Context length",
-            "default": "1152"
-        },
-        {
-            "id": "periodicity",
-            "type": "promptString",
-            "description": "Periodicity",
-            "default": "24"
-        },
-        {
-            "id": "norm_const",
-            "type": "promptString",
-            "description": "Normalization constant",
-            "default": "0.4"
-        },
-        {
-            "id": "align_const",
-            "type": "promptString",
-            "description": "Alignment constant",
-            "default": "0.4"
-        },
-        {
-            "id": "pred_len",
-            "type": "pickString",
-            "description": "Prediction length",
-            "options": ["96", "192", "336", "720"],
-            "default": "96"
         }
     ]
 }

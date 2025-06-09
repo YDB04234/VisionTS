@@ -1,9 +1,10 @@
 from torch import nn
 # from long_term_tsf.models.residual_denoising_diffusion_pytorch import ResidualDiffusion
 import sys
-sys.path.append('/root/data1/code/VisionTS/visionts')
-from model import ResidualDiffusionModel
-sys.path.append('/root/data1/code/VisionTS/long_term_tsf')
+sys.path.append("../")
+# 现在可以正常导入
+from visionts.model import ResidualDiffusionModel
+
 
 class Model(nn.Module):
 
@@ -17,7 +18,7 @@ class Model(nn.Module):
         self.pred_len = config.pred_len
         self.seq_len = config.seq_len
 
-        self.vm = model.ResidualDiffusionModel(finetune_type=config.ft_type)
+        self.vm =  ResidualDiffusionModel(finetune_type=config.ft_type)
 
         self.vm.update_config(context_len=config.seq_len, pred_len=config.pred_len, periodicity=config.periodicity, interpolation=config.interpolation, norm_const=config.norm_const, align_const=config.align_const)
 
