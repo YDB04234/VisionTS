@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch import nn
 from PIL import Image
 from . import util
-from long_term_tsf.models.residual_denoising_diffusion_pytorch import (ResidualDiffusion,
+from visionts.residual_denoising_diffusion_pytorch import (ResidualDiffusion,
                                                       Trainer, Unet, UnetRes,
                                                       set_seed)
 MAE_ARCH = {
@@ -160,12 +160,12 @@ class VisionTS(nn.Module):
         return y
 
 class ResidualDiffusionModel(nn.Module):
-    def __init__(self):
+    def __init__(self, finetune_type='ln'):
         super(ResidualDiffusionModel, self).__init__()
         # set_seed(10)
         # init
-        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(e) for e in [0])
-        sys.stdout.flush()
+        # os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(e) for e in [0])
+        # sys.stdout.flush()
 
         self.num_unet = 2
         self.condition = True
@@ -175,10 +175,10 @@ class ResidualDiffusionModel(nn.Module):
         self.test_res_or_noise = "res_noise",
         self.img_to_img_translation = True
         self.image_size = 64
-        if len(sys.argv) > 1:
-            self.sampling_timesteps = int(sys.argv[1])
-        else:
-            self.sampling_timesteps = 10
+        # if len(sys.argv) > 1:
+        #     self.sampling_timesteps = int(sys.argv[1])
+        # else:
+        self.sampling_timesteps = 10
 
         self.sum_scale = 1
 
@@ -202,7 +202,7 @@ class ResidualDiffusionModel(nn.Module):
             objective=self.objective,
             loss_type='l2',            # L1 or L2
             condition=self.condition,
-            sum_scale=self.sum_scale = 1,
+            sum_scale=self.sum_scale,
             input_condition=self.input_condition,
             input_condition_mask=self.input_condition_mask,
             test_res_or_noise = self.test_res_or_noise,
@@ -215,6 +215,20 @@ class ResidualDiffusionModel(nn.Module):
 
         except:
             print(f"Bad checkpoint file.")
+
+        if finetune_type != 'full':
+            for n, param in self.diffusion.named_parameters():
+                if 'ln' == finetune_type:
+                    param.requires_grad = 'norm' in n
+                elif 'bias' == finetune_type:
+                    param.requires_grad = 'bias' in n
+                elif 'none' == finetune_type:
+                    param.requires_grad = False
+                elif 'mlp' in finetune_type:
+                    param.requires_grad = '.mlp.' in n
+                elif 'attn' in finetune_type:
+                    param.requires_grad = '.attn.' in n
+        
 
     def update_config(self, context_len, pred_len, periodicity=1, norm_const=0.4, align_const=0.4, interpolation='bilinear'):
         self.image_size = 256
@@ -251,7 +265,7 @@ class ResidualDiffusionModel(nn.Module):
         self.output_resize = util.safe_resize((self.periodicity, int(round(self.image_size * self.scale_x))), interpolation=interpolation)
         self.norm_const = norm_const
         
-        mask = torch.ones((self.num_patch, self.num_patch)).to(self.vision_model.cls_token.device)
+        mask = torch.ones((self.num_patch, self.num_patch)).to(self.diffusion.cls_token.device)
         mask[:, :self.num_patch_input] = torch.zeros((self.num_patch, self.num_patch_input))
         self.register_buffer("mask", mask.float().reshape((1, -1)))
         self.mask_ratio = torch.mean(mask).item()
@@ -287,11 +301,12 @@ class ResidualDiffusionModel(nn.Module):
         image_input = einops.repeat(x_concat_with_masked, 'b 1 h w -> b c h w', c=3)
 
         # 4. Reconstruction
-        _, y, mask = self.vision_model(
+        
+        _, y, mask = self.diffusion(
             image_input, 
             mask_ratio=self.mask_ratio, noise=einops.repeat(self.mask, '1 l -> n l', n=image_input.shape[0])
         )
-        image_reconstructed = self.vision_model.unpatchify(y) # [(bs x nvars) x 3 x h x w]
+        image_reconstructed = self.diffusion.unpatchify(y) # [(bs x nvars) x 3 x h x w]
         
         # 5. Forecasting
         y_grey = torch.mean(image_reconstructed, 1, keepdim=True) # color image to grey

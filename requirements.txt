@@ -7,8 +7,8 @@ scikit-learn
 scipy
 sktime
 sympy
-torch
-torchvision
+# torch
+# torchvision
 tqdm
 timm
 datasets
