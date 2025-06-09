@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "VisionTS Long Term Forecast Debug",
+            "name": "ResidualDiffusion Long Term Forecast Debug",
             "type": "python",
             "request": "launch",
             "cwd": "/root/data1/code/VisionTS/long_term_tsf",  // 添加工作路径
@@ -14,7 +14,7 @@
                 "--root_path", "./dataset/ETT-small/",
                 "--data_path", "ETTh1.csv",
                 "--save_dir", "save/ETTh1_${input:pred_len}",
-                "--model_id", "VisionTS_ETTh1_${input:pred_len}",
+                "--model_id", "ResidualDiffusion_ETTh1_${input:pred_len}",
                 "--data", "ETTh1",
                 "--features", "M",
                 "--train_epochs", "1",

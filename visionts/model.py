@@ -210,7 +210,7 @@ class ResidualDiffusionModel(nn.Module):
         )
        
         try:
-            checkpoint = torch.load('/root/data1/code/VisionTS/model-100.pt', map_location='cpu')
+            checkpoint = torch.load('/root/data1/code/ResidualDiffusion/model-100.pt', map_location='cpu')
             self.diffusion.load_state_dict(checkpoint['model'], strict=True)
 
         except:
@@ -265,10 +265,10 @@ class ResidualDiffusionModel(nn.Module):
         self.output_resize = util.safe_resize((self.periodicity, int(round(self.image_size * self.scale_x))), interpolation=interpolation)
         self.norm_const = norm_const
         
-        mask = torch.ones((self.num_patch, self.num_patch)).to(self.diffusion.cls_token.device)
-        mask[:, :self.num_patch_input] = torch.zeros((self.num_patch, self.num_patch_input))
-        self.register_buffer("mask", mask.float().reshape((1, -1)))
-        self.mask_ratio = torch.mean(mask).item()
+        # mask = torch.ones((self.num_patch, self.num_patch)).to(self.diffusion.cls_token.device)
+        # mask[:, :self.num_patch_input] = torch.zeros((self.num_patch, self.num_patch_input))
+        # self.register_buffer("mask", mask.float().reshape((1, -1)))
+        # self.mask_ratio = torch.mean(mask).item()
     
 
     def forward(self, x, export_image=False, fp64=False):
@@ -302,10 +302,9 @@ class ResidualDiffusionModel(nn.Module):
 
         # 4. Reconstruction
         
-        _, y, mask = self.diffusion(
-            image_input, 
-            mask_ratio=self.mask_ratio, noise=einops.repeat(self.mask, '1 l -> n l', n=image_input.shape[0])
-        )
+        y, _ = self.diffusion(image_input)
+
+        
         image_reconstructed = self.diffusion.unpatchify(y) # [(bs x nvars) x 3 x h x w]
         
         # 5. Forecasting
