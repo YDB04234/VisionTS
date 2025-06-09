@@ -1,14 +1,16 @@
 import torch
 
 import os
-
+import sys
 from . import models_mae
 import einops
 import torch.nn.functional as F
 from torch import nn
 from PIL import Image
 from . import util
-
+from long_term_tsf.models.residual_denoising_diffusion_pytorch import (ResidualDiffusion,
+                                                      Trainer, Unet, UnetRes,
+                                                      set_seed)
 MAE_ARCH = {
     "mae_base": [models_mae.mae_vit_base_patch16, "mae_visualize_vit_base.pth"],
     "mae_large": [models_mae.mae_vit_large_patch16, "mae_visualize_vit_large.pth"],
@@ -157,3 +159,164 @@ class VisionTS(nn.Module):
             return y, image_input, image_reconstructed
         return y
 
+class ResidualDiffusionModel(nn.Module):
+    def __init__(self):
+        super(ResidualDiffusionModel, self).__init__()
+        # set_seed(10)
+        # init
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(e) for e in [0])
+        sys.stdout.flush()
+
+        self.num_unet = 2
+        self.condition = True
+        self.input_condition = False
+        self.input_condition_mask = False
+        self.objective='pred_res_noise',
+        self.test_res_or_noise = "res_noise",
+        self.img_to_img_translation = True
+        self.image_size = 64
+        if len(sys.argv) > 1:
+            self.sampling_timesteps = int(sys.argv[1])
+        else:
+            self.sampling_timesteps = 10
+
+        self.sum_scale = 1
+
+        self.model = UnetRes(
+            dim=64,
+            dim_mults=(1, 2, 4, 8),
+            num_unet=2,
+            condition=self.condition,
+            input_condition=self.input_condition,
+            objective=self.objective,
+            test_res_or_noise = self.test_res_or_noise,
+            img_to_img_translation = self.img_to_img_translation
+        )
+
+        self.diffusion = ResidualDiffusion(
+            self.model,
+            image_size=self.image_size,
+            timesteps=1000,           # number of steps
+            # number of sampling timesteps (using ddim for faster inference [see citation for ddim paper])
+            sampling_timesteps=self.sampling_timesteps,
+            objective=self.objective,
+            loss_type='l2',            # L1 or L2
+            condition=self.condition,
+            sum_scale=self.sum_scale = 1,
+            input_condition=self.input_condition,
+            input_condition_mask=self.input_condition_mask,
+            test_res_or_noise = self.test_res_or_noise,
+            img_to_img_translation = self.img_to_img_translation
+        )
+       
+        try:
+            checkpoint = torch.load('/root/data1/code/VisionTS/model-100.pt', map_location='cpu')
+            self.diffusion.load_state_dict(checkpoint['model'], strict=True)
+
+        except:
+            print(f"Bad checkpoint file.")
+
+    def update_config(self, context_len, pred_len, periodicity=1, norm_const=0.4, align_const=0.4, interpolation='bilinear'):
+        self.image_size = 256
+        self.patch_size = 16
+        self.num_patch = self.image_size // self.patch_size
+
+        self.context_len = context_len
+        self.pred_len = pred_len
+        self.periodicity = periodicity
+
+        self.pad_left = 0
+        self.pad_right = 0
+        if self.context_len % self.periodicity != 0:
+            self.pad_left = self.periodicity - self.context_len % self.periodicity
+
+        if self.pred_len % self.periodicity != 0:
+            self.pad_right = self.periodicity - self.pred_len % self.periodicity
+        
+        input_ratio = (self.pad_left + self.context_len) / (self.pad_left + self.context_len + self.pad_right + self.pred_len)
+        self.num_patch_input = int(input_ratio * self.num_patch * align_const)
+        if self.num_patch_input == 0:
+            self.num_patch_input = 1
+        self.num_patch_output = self.num_patch - self.num_patch_input
+        adjust_input_ratio = self.num_patch_input / self.num_patch
+
+        interpolation = {
+            "bilinear": Image.BILINEAR,
+            "nearest": Image.NEAREST,
+            "bicubic": Image.BICUBIC,
+        }[interpolation]
+
+        self.input_resize = util.safe_resize((self.image_size, int(self.image_size * adjust_input_ratio)), interpolation=interpolation)
+        self.scale_x = ((self.pad_left + self.context_len) // self.periodicity) / (int(self.image_size * adjust_input_ratio))
+        self.output_resize = util.safe_resize((self.periodicity, int(round(self.image_size * self.scale_x))), interpolation=interpolation)
+        self.norm_const = norm_const
+        
+        mask = torch.ones((self.num_patch, self.num_patch)).to(self.vision_model.cls_token.device)
+        mask[:, :self.num_patch_input] = torch.zeros((self.num_patch, self.num_patch_input))
+        self.register_buffer("mask", mask.float().reshape((1, -1)))
+        self.mask_ratio = torch.mean(mask).item()
+    
+
+    def forward(self, x, export_image=False, fp64=False):
+        # Forecasting using visual model.
+        # x: look-back window, size: [bs x context_len x nvars]
+        # fp64=True can avoid math overflow in some benchmark, like Bitcoin.
+        # return: forecasting window, size: [bs x pred_len x nvars]
+
+        # 1. Normalization
+        means = x.mean(1, keepdim=True).detach() # [bs x 1 x nvars]
+        x_enc = x - means
+        stdev = torch.sqrt(
+            torch.var(x_enc.to(torch.float64) if fp64 else x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5) # [bs x 1 x nvars]
+        stdev /= self.norm_const
+        x_enc /= stdev
+        # Channel Independent
+        x_enc = einops.rearrange(x_enc, 'b s n -> b n s') # [bs x nvars x seq_len]
+
+        # 2. Segmentation
+        x_pad = F.pad(x_enc, (self.pad_left, 0), mode='replicate') # [b n s]
+        x_2d = einops.rearrange(x_pad, 'b n (p f) -> (b n) 1 f p', f=self.periodicity)
+
+        # 3. Render & Alignment
+        x_resize = self.input_resize(x_2d)
+        masked = torch.zeros((x_2d.shape[0], 1, self.image_size, self.num_patch_output * self.patch_size), device=x_2d.device, dtype=x_2d.dtype)
+        x_concat_with_masked = torch.cat([
+            x_resize, 
+            masked
+        ], dim=-1)
+        image_input = einops.repeat(x_concat_with_masked, 'b 1 h w -> b c h w', c=3)
+
+        # 4. Reconstruction
+        _, y, mask = self.vision_model(
+            image_input, 
+            mask_ratio=self.mask_ratio, noise=einops.repeat(self.mask, '1 l -> n l', n=image_input.shape[0])
+        )
+        image_reconstructed = self.vision_model.unpatchify(y) # [(bs x nvars) x 3 x h x w]
+        
+        # 5. Forecasting
+        y_grey = torch.mean(image_reconstructed, 1, keepdim=True) # color image to grey
+        y_segmentations = self.output_resize(y_grey) # resize back
+        y_flatten = einops.rearrange(
+            y_segmentations, 
+            '(b n) 1 f p -> b (p f) n', 
+            b=x_enc.shape[0], f=self.periodicity
+        ) # flatten
+        y = y_flatten[:, self.pad_left + self.context_len: self.pad_left + self.context_len + self.pred_len, :] # extract the forecasting window
+
+        # 6. Denormalization
+        y = y * (stdev.repeat(1, self.pred_len, 1))
+        y = y + (means.repeat(1, self.pred_len, 1))
+
+        if export_image:
+            mask = mask.detach()
+            mask = mask.unsqueeze(-1).repeat(1, 1, self.vision_model.patch_embed.patch_size[0]**2 *3)  # (N, H*W, p*p*3)
+            mask = self.vision_model.unpatchify(mask)  # 1 is removing, 0 is keeping
+            # mask = torch.einsum('nchw->nhwc', mask)
+            image_reconstructed = image_input * (1 - mask) + image_reconstructed * mask
+            green_bg = -torch.ones_like(image_reconstructed) * 2
+            image_input = image_input * (1 - mask) + green_bg * mask
+            image_input = einops.rearrange(image_input, '(b n) c h w -> b n h w c', b=x_enc.shape[0])
+            
+            image_reconstructed = einops.rearrange(image_reconstructed, '(b n) c h w -> b n h w c', b=x_enc.shape[0])
+            return y, image_input, image_reconstructed
+        return y

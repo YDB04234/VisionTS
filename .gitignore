@@ -6,4 +6,5 @@ build/
 dist/
 *.egg-info
 dist.sh/
-RDDM
+RDDM/
+model-100.pt
